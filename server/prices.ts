@@ -3,6 +3,8 @@ export interface ModelPrice {
   inputPerMillion: number;
   outputPerMillion: number;
   cachedInputPerMillion?: number;
+  /** Absent: a cache write costs what fresh input does. */
+  cacheWritePerMillion?: number;
 }
 
 /** Keyed by `driver/model`, by model id, or `default`. */
@@ -14,6 +16,8 @@ export interface PricedTurn {
   input: number;
   output: number;
   cachedInput?: number;
+  /** Of `input`, the tokens written to the prompt cache. */
+  cacheWrite?: number;
 }
 
 export function priceFor(turn: Pick<PricedTurn, "driverKind" | "model">, prices: PriceList): ModelPrice | null {
@@ -31,7 +35,9 @@ export function billableFor(turn: PricedTurn, prices: PriceList): number | null 
   if (!price) return null;
   const input = clean(turn.input);
   const cached = Math.min(clean(turn.cachedInput), input);
-  const fresh = input - cached;
+  const written = Math.min(clean(turn.cacheWrite), input - cached);
+  const fresh = input - cached - written;
   const cachedRate = price.cachedInputPerMillion ?? price.inputPerMillion;
-  return (fresh * price.inputPerMillion + cached * cachedRate + clean(turn.output) * price.outputPerMillion) / 1_000_000;
+  const writeRate = price.cacheWritePerMillion ?? price.inputPerMillion;
+  return (fresh * price.inputPerMillion + cached * cachedRate + written * writeRate + clean(turn.output) * price.outputPerMillion) / 1_000_000;
 }

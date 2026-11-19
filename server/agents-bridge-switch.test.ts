@@ -555,6 +555,26 @@ describe("a bot on a local model gets the bridge without the switch", () => {
   });
 });
 
+describe("an API engine whose provider caches no prompt gets the bridge without the switch", () => {
+  const hosted = { driverKind: "openai-compat", config: { url: "https://api.groq.com/openai/v1" } };
+
+  it("once its turns show no cache reads", () => {
+    expect(agentsToolBridgeRefusal({}, {}, hosted, {})).toBe("the switch is off");
+    expect(agentsToolBridgeRefusal({}, {}, { ...hosted, uncachedPrompts: true }, {})).toBeNull();
+    expect(agentsToolBridgeRefusal({}, {}, { driverKind: "groq", uncachedPrompts: true }, {})).toBeNull();
+  });
+
+  it("not on an engine outside the chat runtime, nor past the operator's no or a tool selection", () => {
+    expect(agentsToolBridgeRefusal({}, {}, { driverKind: "codex", uncachedPrompts: true }, {})).toBe("the switch is off");
+    expect(agentsToolBridgeRefusal({}, {}, { ...hosted, uncachedPrompts: true }, { OMB_AGENTS_TOOL_BRIDGE: "0" })).toBe("the switch is off");
+    expect(agentsToolBridgeRefusal({}, { toolScope: { allow: ["native:read"] } }, { ...hosted, uncachedPrompts: true }, {})).toBe("the bot has a tool selection");
+  });
+
+  it("carries the reading from the turn's engine", () => {
+    expect(turnEngine({ instanceId: "groq", driverKind: "groq" }, {}, undefined, undefined, true)).toEqual({ driverKind: "groq", instanceId: "groq", uncachedPrompts: true });
+  });
+});
+
 describe("which bots a turn is bridged for", () => {
   it("writes the switch on every turn, so a value inherited from the server's own environment cannot stand in", () => {
     expect(agentsToolBridgeEnv({}, bot, CLAUDE, {})).toEqual(off);

@@ -46,7 +46,7 @@ import { createOrgModelBlocks, modelSwapNotice, withOrgBlocks } from "./claude-m
 import { engineHomes } from "../engine-homes/engine-homes.ts";
 import { TEAM_TOOLS_FAILED, failedCustomMcp, teamToolsFailed } from "./team-tools.ts";
 import { PRESTART_IDLE_MS, armIdleClose, engineIdleMs, sessionIdlePolicy, stopIdleClose, stoppedForRoom } from "./session-idle.ts";
-import { keyedStable, promptHalves, withRosterNote, withVolatileNote } from "./prompt-split.ts"; import { CLAUDE_OWN_MEMORY_OFF } from "./claude-own-memory.ts";
+import { keyedStable, mentionParts, promptHalves, volatileChangeNote, volatileHeld, withRosterNote, withVolatileChanges, withVolatileNote, type VolatileHeld } from "./prompt-split.ts"; import { CLAUDE_OWN_MEMORY_OFF } from "./claude-own-memory.ts";
 import { parseVersionTriple, versionAtLeast } from "./acp/version-probe.ts";
 import {
   applyClaudeInject,
@@ -828,6 +828,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       argsKey: string; /** the CLI version whose --help chose the args, and whether they include --autocompact */ cliVersion: string | null; passedAutocompact: boolean;
       /** the volatile half the conversation holds; null once a compaction may have summarized it away. `roster`: the team roster in the launch prompt, and the one the conversation holds now (a compaction keeps only the first) */
       volatile: string | null; roster: { launched: string; now: string };
+      /** Which volatile sections the conversation holds, when the turn that handed them listed its sections; null when unknown. */
+      held: VolatileHeld | null;
       sessionId: string | null;
       /** `init` arrived; before it the CLI took nothing, so a resume retry is safe */
       sawInit: boolean;
@@ -1218,11 +1220,14 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           stopSession(live);
         }, turnId, broker: live.broker });
         emit({ ...base(threadId, turnId), type: "turn.started" });
-        const volatile = turn.systemVolatile ?? "", roster = turn.systemRoster ?? "", same = !turn.mentionTurn && (volatile === live.volatile || (live.volatile === null && !volatile.trim()));
+        const volatile = turn.systemVolatile ?? "", roster = turn.systemRoster ?? "", parts = turn.systemVolatileParts;
+        const changes = parts && live.volatile !== null && live.held ? volatileChangeNote(parts, live.held, mentionParts(Boolean(turn.mentionTurn))) : null;
+        const same = changes !== null ? !changes : !turn.mentionTurn && (volatile === live.volatile || (live.volatile === null && !volatile.trim()));
+        const withVolatile = changes !== null ? withVolatileChanges(turn.text, changes) : withVolatileNote(turn.text, volatile, live.volatile === null);
         const message = same && roster === live.roster.now
           ? promptMsg // a changed roster (a bot added, renamed or removed) rides this message, with no relaunch
-          : claudeUserMessage(withRosterNote(same ? turn.text : withVolatileNote(turn.text, volatile, live.volatile === null), roster, live.roster.now), turn.images);
-        live.volatile = volatile; live.roster.now = roster;
+          : claudeUserMessage(withRosterNote(same ? turn.text : withVolatile, roster, live.roster.now), turn.images);
+        live.volatile = volatile; live.held = parts ? volatileHeld(parts) : null; live.roster.now = roster;
         const running = live.turn;
         // A warm process can exit just as the next turn is written; its close resumes this turn.
         if (!(await writeUser(live, threadId, message)) && !running?.stopRequested) closeSession(threadId, "stdin write failed");
@@ -1362,7 +1367,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         mcpConfigPath,
         systemPromptPath,
         argsKey, cliVersion: cliHelpVersion, passedAutocompact,
-        volatile: spare ? null : turn.systemVolatile ?? "", roster: { launched: turn.systemRoster ?? "", now: turn.systemRoster ?? "" },
+        volatile: spare ? null : turn.systemVolatile ?? "", held: spare || !turn.systemVolatileParts ? null : volatileHeld(turn.systemVolatileParts), roster: { launched: turn.systemRoster ?? "", now: turn.systemRoster ?? "" },
         sessionId: sessionId ?? newSessionId,
         sawInit: false,
         nativePermissionMode: null,
@@ -1489,7 +1494,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
               if (retry.rebuilt) emit({ ...base(threadId, currentTurnId()), type: "runtime.notice", message: rebuiltSessionNotice("Claude Code") });
               retry.rebuilt = false;
             } else if (o.subtype === "compact_boundary") {
-              session.volatile = null; session.roster.now = session.roster.launched; if (!o.parent_tool_use_id) emit({ ...base(threadId, currentTurnId()), type: "context.compacted" }); // only the system prompt survives a compaction, so the next turn re-sends the volatile half; a subagent's own compaction is not the chat's
+              session.volatile = null; session.held = null; session.roster.now = session.roster.launched; if (!o.parent_tool_use_id) emit({ ...base(threadId, currentTurnId()), type: "context.compacted" }); // only the system prompt survives a compaction, so the next turn re-sends the volatile half; a subagent's own compaction is not the chat's
             } else if (o.subtype === "thinking_tokens") {
               emit({ ...base(threadId, currentTurnId()), type: "item.updated", itemType: "reasoning", tokens: o.estimated_tokens });
             }

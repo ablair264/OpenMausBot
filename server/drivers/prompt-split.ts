@@ -45,9 +45,68 @@ export interface PromptSplitReceipt {
   turnsSinceFull?: number;
   lastUsed?: number;
   peakUsed?: number;
+  held?: VolatileHeld;
 }
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
+const isDigest = (value: unknown): value is string => typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
+
+/** One section of the volatile half, as SendTurnInput.systemVolatileParts carries it. */
+export interface VolatilePart {
+  id: string;
+  label: string;
+  text: string;
+}
+
+/** What a session was last handed of each volatile section, by section id. */
+export type VolatileHeld = Record<string, { label: string; digest: string }>;
+
+export const MENTIONS_PART_ID = "mentions";
+
+function partsById(parts: readonly VolatilePart[]): VolatilePart[] {
+  const merged = new Map<string, VolatilePart>();
+  for (const part of parts) {
+    if (!part.text.trim()) continue;
+    const earlier = merged.get(part.id);
+    merged.set(part.id, earlier ? { ...earlier, text: earlier.text + part.text } : part);
+  }
+  return [...merged.values()];
+}
+
+export function volatileHeld(parts: readonly VolatilePart[]): VolatileHeld {
+  return Object.fromEntries(partsById(parts).map((part) => [part.id, { label: part.label, digest: digest(part.text) }]));
+}
+
+export function parseVolatileHeld(value: unknown): VolatileHeld | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const held: VolatileHeld = {};
+  for (const [id, entry] of Object.entries(value)) {
+    const { label, digest: text } = (entry ?? {}) as { label?: unknown; digest?: unknown };
+    if (typeof label !== "string" || !isDigest(text)) return undefined;
+    held[id] = { label, digest: text };
+  }
+  return held;
+}
+
+export const VOLATILE_CHANGES_PREFIX =
+  "Some parts of your instructions changed since this session started. Each part below replaces its earlier copy; every part not listed here still holds as it was:";
+
+/** Only the sections that changed, appeared or were cleared since the session was handed `held`; an `always` section goes
+ * in unchanged too. Empty when there is nothing to say. */
+export function volatileChangeNote(parts: readonly VolatilePart[], held: VolatileHeld, always: ReadonlySet<string> = new Set()): string {
+  const current = partsById(parts);
+  const changed = current.filter((part) => always.has(part.id) || held[part.id]?.digest !== digest(part.text));
+  const present = new Set(current.map((part) => part.id));
+  const cleared = Object.entries(held).filter(([id]) => !present.has(id)).map(([, entry]) => entry.label);
+  if (!changed.length && !cleared.length) return "";
+  return [
+    VOLATILE_CHANGES_PREFIX,
+    ...changed.map((part) => `[${part.label}]\n${part.text.trim()}`),
+    ...cleared.map((label) => `[${label}]\nNo longer applies.`),
+  ].join("\n\n");
+}
+
+export const mentionParts = (mentionTurn: boolean): ReadonlySet<string> => new Set(mentionTurn ? [MENTIONS_PART_ID] : []);
 
 const EMPTY_FINGERPRINT = digest("");
 
@@ -62,14 +121,16 @@ export function readPromptSplitReceipt(scope: string, key: string): PromptSplitR
   try {
     const raw = JSON.parse(readFileSync(receiptPath(scope, key), "utf8")) as unknown;
     if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-      const record = raw as { stable?: unknown; volatile?: unknown; turnsSinceFull?: unknown; lastUsed?: unknown; peakUsed?: unknown };
+      const record = raw as { stable?: unknown; volatile?: unknown; turnsSinceFull?: unknown; lastUsed?: unknown; peakUsed?: unknown; held?: unknown };
       if (typeof record.stable === "string" && typeof record.volatile === "string") {
+        const held = parseVolatileHeld(record.held);
         return {
           stable: record.stable,
           volatile: record.volatile,
           ...(typeof record.turnsSinceFull === "number" ? { turnsSinceFull: record.turnsSinceFull } : {}),
           ...(typeof record.lastUsed === "number" && record.lastUsed > 0 ? { lastUsed: record.lastUsed } : {}),
           ...(typeof record.peakUsed === "number" && record.peakUsed > 0 ? { peakUsed: record.peakUsed } : {}),
+          ...(held ? { held } : {}),
         };
       }
     }
@@ -88,7 +149,9 @@ export function deletePromptSplitReceipt(scope: string, key: string): void {
   } catch {}
 }
 
-/** reAnchorAfterTurns re-sends the full prompt after that many bare turns, for history rewrites no event reports. */
+/** reAnchorAfterTurns re-sends the full prompt after that many bare turns, for history rewrites no event reports; a session
+ * whose engine reports its context size is not re-anchored, since a compaction shows as that size collapsing. With `parts`,
+ * a changed volatile half rides as only the sections that changed. */
 export function splitSessionPrompt(
   stable: string,
   volatile: string,
@@ -97,17 +160,22 @@ export function splitSessionPrompt(
   text: string,
   perTurnVolatile = false,
   reAnchorAfterTurns = 0,
+  parts?: readonly VolatilePart[],
 ): { text: string; receipt: PromptSplitReceipt } {
   const fingerprints = promptSplitFingerprints(stable, volatile);
+  const held = parts ? { held: volatileHeld(parts) } : {};
   const turnsSinceFull = typeof previous?.turnsSinceFull === "number" ? previous.turnsSinceFull : 0;
-  const reAnchor = reAnchorAfterTurns > 0 && previous !== null && turnsSinceFull >= reAnchorAfterTurns;
+  const measured = previous?.lastUsed !== undefined || previous?.peakUsed !== undefined;
+  const reAnchor = reAnchorAfterTurns > 0 && previous !== null && !measured && turnsSinceFull >= reAnchorAfterTurns;
   if (previous === null || previous.stable !== fingerprints.stable || reAnchor) {
-    return { text: fullSystem ? fullSystem + "\n\n" + text : text, receipt: { ...fingerprints, turnsSinceFull: 0 } };
+    return { text: fullSystem ? fullSystem + "\n\n" + text : text, receipt: { ...fingerprints, turnsSinceFull: 0, ...held } };
   }
-  const note = previous.volatile === fingerprints.volatile && !perTurnVolatile
-    ? ""
-    : volatileContextNote(volatile, previous.volatile !== EMPTY_FINGERPRINT);
-  return { text: withContextNote(note, text), receipt: { ...fingerprints, turnsSinceFull: turnsSinceFull + 1 } };
+  const note = parts && previous.held
+    ? volatileChangeNote(parts, previous.held, mentionParts(perTurnVolatile))
+    : previous.volatile === fingerprints.volatile && !perTurnVolatile
+      ? ""
+      : volatileContextNote(volatile, previous.volatile !== EMPTY_FINGERPRINT);
+  return { text: withContextNote(note, text), receipt: { ...fingerprints, turnsSinceFull: turnsSinceFull + 1, ...held } };
 }
 
 /** The stable half a per-thread process is keyed on: without the team roster (`systemRoster`), which a warm process takes
@@ -133,6 +201,15 @@ export function withVolatileNote(text: string, volatile: string, launch = false)
     : launch
       ? `This part of your instructions changes from turn to turn, so it arrives here instead of in the system prompt. It replaces any earlier copy:\n\n${volatile.trim()}`
       : `This part of your instructions changed since this session started. It replaces the earlier copy:\n\n${volatile.trim()}`;
+  return withSystemReminder(body, text);
+}
+
+/** A volatileChangeNote as a reminder in a Claude turn. */
+export function withVolatileChanges(text: string, note: string): string {
+  return note ? withSystemReminder(note, text) : text;
+}
+
+function withSystemReminder(body: string, text: string): string {
   const note = `<system-reminder>\n${body}\n</system-reminder>`;
   return text ? `${note}\n\n${text}` : note;
 }

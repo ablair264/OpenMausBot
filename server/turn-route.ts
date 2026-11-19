@@ -1,6 +1,7 @@
 import type { ModelCatalog, ModelSelection } from "./contracts.ts";
 import { isConversational, type ReplyStyle } from "../shared/reply-style.ts";
 import type { EffortLevel } from "../shared/wire.ts";
+import type { ModelPrice } from "./prices.ts";
 
 export type TurnTier = "simple" | "complex";
 
@@ -20,6 +21,17 @@ const ACK = /^(thanks|thank you|thx|ty|cool|nice|great|perfect|awesome|got it|lo
 const SIMPLE_CHARS = 280;
 const SIMPLE_LINES = 4;
 const QUICK_CONTEXT_SHARE = 0.6;
+/** About what a reply to a short, simple message runs to. */
+const QUICK_REPLY_TOKENS = 400;
+
+/** A quick model has no cache of this thread: it reads the whole context at its input or cache-write rate, where the
+ * bot's own model reads it from its cache. The quick model only pays when its cheaper reply outweighs that. */
+export function quickCostsMore(contextTokens: number | undefined, own: ModelPrice | null | undefined, quick: ModelPrice | null | undefined): boolean {
+  if (!contextTokens || !own || !quick) return false;
+  const ownCost = contextTokens * (own.cachedInputPerMillion ?? own.inputPerMillion) + QUICK_REPLY_TOKENS * own.outputPerMillion;
+  const quickCost = contextTokens * (quick.cacheWritePerMillion ?? quick.inputPerMillion) + QUICK_REPLY_TOKENS * quick.outputPerMillion;
+  return quickCost >= ownCost;
+}
 
 export function classifyTurn(signals: TurnSignals): TurnTier {
   const text = signals.text.trim();
@@ -61,6 +73,8 @@ export interface RouteInput {
   /** Quick models this engine instance refused before. */
   refused?: ReadonlySet<string>;
   effortLevels?: readonly EffortLevel[];
+  /** What a model costs on this engine, when known. */
+  priceOf?: (model: string) => ModelPrice | null;
 }
 
 export interface RouteResult {
@@ -84,6 +98,7 @@ export function routeTurn(input: RouteInput): RouteResult {
   }
   const option = input.catalog?.options.find((candidate) => candidate.id === fast);
   if (option?.contextWindow && (input.contextTokens ?? 0) > option.contextWindow * QUICK_CONTEXT_SHARE) return { ...keep, tier };
+  if (quickCostsMore(input.contextTokens, input.priceOf?.(input.model), input.priceOf?.(fast))) return { ...keep, tier };
   // Effort and variant belong to the configured model; the quick model runs on its engine's defaults.
   return { tier, model: fast, quickModel: option?.label ?? fast };
 }
@@ -97,6 +112,7 @@ export function routeDirectTurn(
   instance: { models?: ModelCatalog; quickModelsUsable?: () => boolean; adapter: { capabilities: { effortLevels?: readonly EffortLevel[] } } },
   automated: boolean,
   refused?: ReadonlySet<string>,
+  priceOf?: (model: string) => ModelPrice | null,
 ): RouteResult {
   const lastAsk = path.findLastIndex((m) => m.role === "user" && m.kind === "text");
   return routeTurn({
@@ -115,5 +131,6 @@ export function routeDirectTurn(
     refused,
     effortLevels: instance.adapter.capabilities.effortLevels,
     contextTokens: task.usage?.context?.tokens,
+    ...(priceOf ? { priceOf } : {}),
   });
 }

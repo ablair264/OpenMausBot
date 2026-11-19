@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { estimatePriceFor, ledgerCost, listPriceFor, listPrices } from "./model-prices.ts";
+import { ANTHROPIC_CACHE_WRITE_RATE, estimatePriceFor, ledgerCost, listPriceFor, listPrices } from "./model-prices.ts";
 import type { PriceList } from "./prices.ts";
 
 const OFFICIAL = [
@@ -30,7 +30,7 @@ describe("built-in list prices", () => {
     expect(listPriceFor("MiniMax-M3")).toEqual({ inputPerMillion: 0.3, cachedInputPerMillion: 0.06, outputPerMillion: 1.2 });
     expect(listPriceFor("gpt-5.5")).toEqual({ inputPerMillion: 5, cachedInputPerMillion: 0.5, outputPerMillion: 30 });
     for (const fable of ["claude-fable-5-2", "anthropic/claude-fable-5.2"]) {
-      expect(listPriceFor(fable), fable).toEqual({ inputPerMillion: 8, cachedInputPerMillion: 0.2, outputPerMillion: 40 });
+      expect(listPriceFor(fable), fable).toEqual({ inputPerMillion: 8, cachedInputPerMillion: 0.2, cacheWritePerMillion: 10, outputPerMillion: 40 });
     }
     expect(listPriceFor("gemini-3.8-flash-high", new Date("2026-12-31T23:00:00Z"))?.inputPerMillion).toBe(0.75);
     expect(listPriceFor("gemini-3.8-flash", new Date("2027-01-01T00:00:00Z"))).toEqual({ inputPerMillion: 1.5, cachedInputPerMillion: 0.15, outputPerMillion: 7.5 });
@@ -88,5 +88,13 @@ describe("what the ledger books for a settled turn", () => {
   it("books an unpriced model as unpriced, not as free", () => {
     expect(ledgerCost({ driverKind: "grokAgent", model: "fake-model", input: 5000, output: 100, costUsd: null }, null)).toEqual({ costUsd: null });
     expect(ledgerCost({ driverKind: "codex", model: "gpt-5.3-codex-spark", input: 5000, output: 100, costUsd: undefined }, { "claude-sonnet-5": { inputPerMillion: 1, outputPerMillion: 1 } })).toEqual({ costUsd: null });
+  });
+});
+
+describe("cache-write list prices", () => {
+  it("prices an Anthropic model's cache write above its input, and no other vendor's", () => {
+    const claude = listPriceFor("claude-sonnet-5");
+    expect(claude?.cacheWritePerMillion).toBeCloseTo(claude!.inputPerMillion * ANTHROPIC_CACHE_WRITE_RATE);
+    expect(listPriceFor("gpt-5.5")?.cacheWritePerMillion).toBeUndefined();
   });
 });

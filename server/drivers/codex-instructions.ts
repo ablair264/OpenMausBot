@@ -5,12 +5,14 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DATA_DIR } from "../config.ts";
 import { writeFileAtomic } from "../atomic.ts";
+import { mentionParts, parseVolatileHeld, volatileChangeNote, volatileHeld, type VolatileHeld, type VolatilePart } from "./prompt-split.ts";
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 
 export interface CodexInstructionReceipt {
   instructions: string;
   volatile?: string;
+  held?: VolatileHeld;
 }
 
 const isFingerprint = (value: string) => /^[0-9a-f]{64}$/.test(value);
@@ -22,11 +24,14 @@ function parseReceipt(raw: string | undefined): CodexInstructionReceipt | null {
   try {
     const parsed = JSON.parse(trimmed) as unknown;
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      const record = parsed as { instructions?: unknown; volatile?: unknown };
+      const record = parsed as { instructions?: unknown; volatile?: unknown; held?: unknown };
       if (typeof record.instructions === "string" && isFingerprint(record.instructions)) {
+        const volatile = typeof record.volatile === "string" && isFingerprint(record.volatile) ? record.volatile : undefined;
+        const held = volatile === undefined ? undefined : parseVolatileHeld(record.held);
         return {
           instructions: record.instructions,
-          ...(typeof record.volatile === "string" && isFingerprint(record.volatile) ? { volatile: record.volatile } : {}),
+          ...(volatile === undefined ? {} : { volatile }),
+          ...(held ? { held } : {}),
         };
       }
     }
@@ -57,7 +62,8 @@ export async function syncCodexInstructions(
   resumed: boolean,
   request: (method: string, params: Record<string, unknown>) => Promise<unknown>,
   mentionTurn = false,
-): Promise<{ deliverVolatile: boolean; hadVolatile: boolean; commitVolatile: (() => void) | null }> {
+  parts?: readonly VolatilePart[],
+): Promise<{ deliverVolatile: boolean; hadVolatile: boolean; changes: string | null; commitVolatile: (() => void) | null }> {
   const directory = join(DATA_DIR, "codex-instructions");
   const path = join(directory, `${digest(JSON.stringify([key, nativeThreadId]))}.sha256`);
   const fingerprint = digest(instructions);
@@ -92,18 +98,20 @@ export async function syncCodexInstructions(
       throw error;
     }
   }
-  const deliverVolatile = !resumed || previous?.volatile !== volatileFingerprint || mentionTurn;
+  const changes = resumed && parts && previous?.held ? volatileChangeNote(parts, previous.held, mentionParts(mentionTurn)) : null;
+  const deliverVolatile = changes !== null ? changes !== "" : !resumed || previous?.volatile !== volatileFingerprint || mentionTurn;
   const hadVolatile = typeof previous?.volatile === "string" && previous.volatile !== digest("");
   if (!resumed || previous?.instructions !== fingerprint) {
     // The volatile digest stays pending until the provider accepts the turn, so a rejected one redelivers.
     mkdirSync(directory, { recursive: true });
     writeFileAtomic(path, JSON.stringify({ instructions: fingerprint }), { mode: 0o600 });
   }
-  const commitVolatile = previous?.instructions === fingerprint && previous?.volatile === volatileFingerprint
+  const held = parts ? volatileHeld(parts) : undefined;
+  const commitVolatile = previous?.instructions === fingerprint && previous?.volatile === volatileFingerprint && (held === undefined || previous.held !== undefined)
     ? null
     : () => {
         mkdirSync(directory, { recursive: true });
-        writeFileAtomic(path, JSON.stringify({ instructions: fingerprint, volatile: volatileFingerprint }), { mode: 0o600 });
+        writeFileAtomic(path, JSON.stringify({ instructions: fingerprint, volatile: volatileFingerprint, ...(held ? { held } : {}) }), { mode: 0o600 });
       };
-  return { deliverVolatile, hadVolatile, commitVolatile };
+  return { deliverVolatile, hadVolatile, changes, commitVolatile };
 }

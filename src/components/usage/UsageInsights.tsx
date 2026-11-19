@@ -23,7 +23,7 @@ type Board = "models" | "bots" | "people" | "engines" | "routines" | "department
 export type GroupLabel = (groupBy: "bot" | "user" | "routine" | "department", entry: Pick<InsightEntry, "key" | "label">) => string;
 
 const ink = (share: number) => `color-mix(in oklab, var(--color-ink) ${share}%, var(--color-menu))`;
-const TYPE_COLORS = { input: ink(62), cached: ink(30), output: ink(100) } as const;
+const TYPE_COLORS = { input: ink(62), written: ink(46), cached: ink(30), output: ink(100) } as const;
 /** The validated categorical order (dataviz reference palette), used where a part is a person, not a model. */
 const CATEGORICAL = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"];
 const OTHER_COLOR = "#76828F";
@@ -520,7 +520,8 @@ function Shares({ data, metric, groupLabel }: { data: UsageInsights; metric: Ins
   return (
     <section className="flex flex-col gap-5 p-4" aria-label={t("insights.mix")}>
       <ShareBar title={t("insights.tokensByType")} testId="insight-mix" format={formatTokens} parts={[
-        { key: "input", label: t("insights.freshInput"), value: totals.input, color: TYPE_COLORS.input },
+        { key: "input", label: t("insights.freshInput"), value: totals.input - totals.cacheWrite, color: TYPE_COLORS.input },
+        { key: "written", label: t("insights.cacheWrites"), value: totals.cacheWrite, color: TYPE_COLORS.written },
         { key: "cached", label: t("insights.cachedInput"), value: totals.cachedInput, color: TYPE_COLORS.cached },
         { key: "output", label: t("insights.output"), value: totals.output, color: TYPE_COLORS.output },
       ]} />

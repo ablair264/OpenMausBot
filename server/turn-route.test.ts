@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { classifyTurn, fastModelFor, routeDirectTurn, routeTurn, type RouteInput } from "./turn-route.ts";
+import { classifyTurn, fastModelFor, quickCostsMore, routeDirectTurn, routeTurn, type RouteInput } from "./turn-route.ts";
 import type { ModelCatalog } from "./contracts.ts";
 
 const plain = { attachments: 0, priorTurnUsedTools: false };
@@ -121,6 +121,39 @@ describe("long conversations", () => {
   it("stays on the configured model when the thread would crowd the quick model's window", () => {
     expect(routeTurn({ ...input, contextTokens: 150_000 })).toEqual({ tier: "simple", model: "claude-opus-5", effort: "high", variant: undefined });
     expect(routeTurn({ ...input, contextTokens: 40_000 }).quickModel).toBe("Claude Haiku 4.5");
+  });
+});
+
+describe("what a quick model costs on a thread its own cache has never seen", () => {
+  const prices: Record<string, { inputPerMillion: number; outputPerMillion: number; cachedInputPerMillion?: number; cacheWritePerMillion?: number }> = {
+    "claude-sonnet-5": { inputPerMillion: 2, cachedInputPerMillion: 0.2, outputPerMillion: 10 },
+    "claude-haiku-4-5": { inputPerMillion: 1, cachedInputPerMillion: 0.1, cacheWritePerMillion: 1.25, outputPerMillion: 5 },
+    "claude-haiku-5-5": { inputPerMillion: 0.1, cachedInputPerMillion: 0.01, cacheWritePerMillion: 0.125, outputPerMillion: 0.5 },
+  };
+  const priceOf = (model: string) => prices[model] ?? null;
+  const catalog = (quick: string): ModelCatalog => ({ default: "claude-sonnet-5", options: [
+    { id: "claude-sonnet-5", label: "Claude Sonnet 5" }, { id: quick, label: quick },
+  ] });
+  const input = (quick: string, contextTokens: number): RouteInput => ({
+    conversational: true, followsBotModel: true, automated: false, signals: { text: "hi there", ...plain },
+    model: "claude-sonnet-5", catalog: catalog(quick), contextTokens, priceOf,
+  });
+
+  it("stays on the bot's model when reading the thread fresh costs more than the shorter reply saves", () => {
+    expect(quickCostsMore(40_000, prices["claude-sonnet-5"], prices["claude-haiku-4-5"])).toBe(true);
+    expect(routeTurn(input("claude-haiku-4-5", 40_000))).toMatchObject({ tier: "simple", model: "claude-sonnet-5" });
+    expect(routeTurn(input("claude-haiku-4-5", 40_000)).quickModel).toBeUndefined();
+  });
+
+  it("moves to a quick model that stays cheaper, and on a thread too short for its cache to matter", () => {
+    expect(routeTurn(input("claude-haiku-5-5", 40_000)).model).toBe("claude-haiku-5-5");
+    expect(routeTurn(input("claude-haiku-4-5", 1_000)).model).toBe("claude-haiku-4-5");
+  });
+
+  it("decides as before when a price or the thread's size is unknown", () => {
+    expect(quickCostsMore(undefined, prices["claude-sonnet-5"], prices["claude-haiku-4-5"])).toBe(false);
+    expect(quickCostsMore(40_000, null, prices["claude-haiku-4-5"])).toBe(false);
+    expect(routeTurn({ ...input("claude-haiku-4-5", 40_000), priceOf: undefined }).model).toBe("claude-haiku-4-5");
   });
 });
 

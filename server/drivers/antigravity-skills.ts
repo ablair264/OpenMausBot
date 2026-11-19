@@ -82,9 +82,11 @@ export function stageAntigravitySkills(turn: SendTurnInput, profile: string): Se
       throw new Error("Antigravity staged skill files changed.");
     }
     stagedFiles.push(join(target, "SKILL.md"));
+    const staged = JSON.stringify(join(target, "SKILL.md"));
     for (const field of PROMPT_FIELDS) {
-      if (result[field] !== undefined) result[field] = result[field]!.replaceAll(quoted, JSON.stringify(join(target, "SKILL.md")));
+      if (result[field] !== undefined) result[field] = result[field]!.replaceAll(quoted, staged);
     }
+    if (result.systemVolatileParts) result.systemVolatileParts = result.systemVolatileParts.map((part) => ({ ...part, text: part.text.replaceAll(quoted, staged) }));
   }
   result.skillFiles = stagedFiles;
   return result;

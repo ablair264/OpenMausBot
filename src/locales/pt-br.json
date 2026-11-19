@@ -11260,6 +11260,7 @@
   "insights.tokensByType": "Tokens por tipo",
   "insights.freshInput": "Entrada nova",
   "insights.cachedInput": "Leituras do cache",
+  "insights.cacheWrites": "Gravações no cache",
   "insights.output": "Saída",
   "insights.spendByPerson": "Gasto por pessoa",
   "insights.tokensByPerson": "Tokens por pessoa",

@@ -25,3 +25,19 @@ describe("priceFor", () => {
     expect(billableFor({ driverKind: "openai", model: "toString", input: 100, output: 10 }, {})).toBeNull();
   });
 });
+
+describe("cache writes", () => {
+  const price = { inputPerMillion: 2, cachedInputPerMillion: 0.2, cacheWritePerMillion: 2.5, outputPerMillion: 10 };
+
+  it("bills the part of input written to the prompt cache at its own rate", () => {
+    const turn = { driverKind: "claudeAgent", model: "m", input: 1_000_000, cachedInput: 600_000, cacheWrite: 300_000, output: 0 };
+    expect(billableFor(turn, { m: price })).toBeCloseTo(100_000 * 2 / 1e6 + 600_000 * 0.2 / 1e6 + 300_000 * 2.5 / 1e6);
+  });
+
+  it("bills a write as fresh input where no write rate is set, and never more writes than input left", () => {
+    const { cacheWritePerMillion: _, ...plain } = price;
+    const turn = { driverKind: "x", model: "m", input: 1_000, cachedInput: 400, cacheWrite: 5_000, output: 0 };
+    expect(billableFor(turn, { m: plain })).toBeCloseTo((600 * 2 + 400 * 0.2) / 1e6);
+    expect(billableFor(turn, { m: price })).toBeCloseTo((600 * 2.5 + 400 * 0.2) / 1e6);
+  });
+});

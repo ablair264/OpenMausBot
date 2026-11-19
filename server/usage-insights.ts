@@ -49,6 +49,7 @@ const freshInput = (row: UsageRow) => Math.max(0, count(row.input) - Math.min(co
 function addTokens(into: InsightTokens, row: UsageRow): void {
   into.input += freshInput(row);
   into.cachedInput += Math.min(count(row.cachedInput), count(row.input));
+  into.cacheWrite += Math.min(count(row.cacheWrite), freshInput(row));
   into.output += count(row.output);
   into.reasoning += count(row.reasoning);
 }
@@ -62,7 +63,7 @@ const rowDuration = (row: UsageRow): number | null => {
 const failed = (row: UsageRow) => row.outcome?.status === "error";
 
 function totalsOf(rows: readonly { row: UsageRow; local: LocalTime }[], days: number): InsightTotals {
-  const totals: InsightTotals = { input: 0, cachedInput: 0, output: 0, reasoning: 0, turns: 0, costUsd: null, unpriced: 0, errors: 0, tools: 0, durationMs: 0, timedTurns: 0, activeDays: 0, days };
+  const totals: InsightTotals = { input: 0, cachedInput: 0, cacheWrite: 0, output: 0, reasoning: 0, turns: 0, costUsd: null, unpriced: 0, errors: 0, tools: 0, durationMs: 0, timedTurns: 0, activeDays: 0, days };
   const active = new Set<string>();
   for (const { row, local } of rows) {
     addTokens(totals, row);
@@ -86,7 +87,7 @@ function entries(rows: readonly UsageRow[], keyOf: (row: UsageRow) => { key: str
     const { key, label, driverKind } = keyOf(row);
     let entry = found.get(key);
     if (!entry) {
-      entry = { key, label, input: 0, cachedInput: 0, output: 0, reasoning: 0, turns: 0, costUsd: null, errors: 0, durationMs: 0, timedTurns: 0, ...(driverKind ? { driverKind } : {}) };
+      entry = { key, label, input: 0, cachedInput: 0, cacheWrite: 0, output: 0, reasoning: 0, turns: 0, costUsd: null, errors: 0, durationMs: 0, timedTurns: 0, ...(driverKind ? { driverKind } : {}) };
       found.set(key, entry);
     }
     addTokens(entry, row);
@@ -119,7 +120,7 @@ export function summarizeInsights(rows: readonly UsageRow[], range: { from: stri
   const unit = dayList.length === 1 ? "hour" : "day";
   const starts = unit === "hour" ? Array.from({ length: 24 }, (_, hour) => `${range.from}T${String(hour).padStart(2, "0")}`) : dayList;
   const buckets = new Map<string, InsightBucket>(starts.map((start) => [start, {
-    start, input: 0, cachedInput: 0, output: 0, reasoning: 0, turns: 0, costUsd: 0, unpriced: 0, errors: 0, durationMs: 0, timedTurns: 0, models: {}, modelCosts: {},
+    start, input: 0, cachedInput: 0, cacheWrite: 0, output: 0, reasoning: 0, turns: 0, costUsd: 0, unpriced: 0, errors: 0, durationMs: 0, timedTurns: 0, models: {}, modelCosts: {},
   }]));
   const hours = Array.from({ length: 7 }, () => Array<number>(24).fill(0));
   for (const { row, local } of current) {

@@ -1,7 +1,9 @@
-/** Token counts as the insights page shows them: `input` is fresh input, without the cached part. */
+/** Token counts as the insights page shows them: `input` is fresh input, without the cached part; `cacheWrite` is the
+ * part of `input` written to the prompt cache, which costs more than other fresh input. */
 export interface InsightTokens {
   input: number;
   cachedInput: number;
+  cacheWrite: number;
   output: number;
   reasoning: number;
 }

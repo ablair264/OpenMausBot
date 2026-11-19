@@ -18,7 +18,7 @@ import { ChatToolSessionError, chatToolNotices, joinLateChatTools, mountChatTool
 import { noteToolBudget } from "../tool-budgets.ts";
 import { chatToolLimitFor, chatToolLimitKey } from "../tool-count-limit.ts";
 import { assertImageTransport, chatImageBudget, chatToolImages, chatUserContent, type ChatContentPart } from "./chat-images.ts";
-import { promptHalves, volatileContextNote, withContextNote } from "./prompt-split.ts";
+import { mentionParts, promptHalves, volatileChangeNote, volatileContextNote, volatileHeld, withContextNote, type VolatileHeld } from "./prompt-split.ts";
 import { createChatToolApproval, refusal } from "./chat-tool-approval.ts";
 import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, object, replayableToolCalls, toolArguments, type ChatToolCall } from "./openai-chat-protocol.ts";
 import { completionError, httpErrorDetail, refusedToolCall, refusedToolCallFailure, rejectsReasoningReplay, rejectsToolsParameter, RejectedToolCallError, StreamTruncatedError, UnsupportedChatToolsError, UnsupportedReasoningReplayError, type ProviderBody } from "./openai-chat-refusals.ts";
@@ -147,8 +147,16 @@ interface DeliveredUserMessage {
   text: string;
   sent: string;
   volatile?: string;
+  /** Every volatile section the conversation holds once this message is read. */
+  held?: VolatileHeld;
+  /** Numbers the note this message carried. A note of changed sections only names in `base` the note it builds on, and
+   * means nothing once that one is no longer replayed. */
+  note?: number;
+  base?: number;
   after: string;
 }
+
+let notesSent = 0;
 
 const MAX_REPLAY_EXTRA_BYTES = 24_000;
 const MAX_DELIVERED_THREADS = 256;
@@ -158,7 +166,7 @@ const fingerprint = (text: string) => createHash("sha256").update(text).digest("
 function replayDelivered(
   transcript: ReadonlyArray<{ role: "user" | "assistant"; text: string }>,
   records: readonly DeliveredUserMessage[],
-): { content: Map<number, string>; matched: DeliveredUserMessage[]; volatile: string | undefined } {
+): { content: Map<number, string>; matched: DeliveredUserMessage[]; volatile: string | undefined; held: VolatileHeld | undefined; note: number | undefined } {
   const found: Array<{ index: number; record: DeliveredUserMessage }> = [];
   let next = records.length - 1;
   for (let index = transcript.length - 1; index >= 0 && next >= 0; index--) {
@@ -176,15 +184,22 @@ function replayDelivered(
   }
   const content = new Map<number, string>();
   let volatile: string | undefined;
+  let held: VolatileHeld | undefined;
+  let note: number | undefined;
   let budget = MAX_REPLAY_EXTRA_BYTES;
   for (const { index, record } of found) {
     const extra = Buffer.byteLength(record.sent) - Buffer.byteLength(transcript[index]!.text);
     if (extra > budget) break;
     budget -= extra;
     content.set(index, record.sent);
-    if (record.volatile !== undefined) volatile = record.volatile;
+    if (record.volatile !== undefined) {
+      const whole = record.base === undefined || record.base === note;
+      volatile = whole ? record.volatile : undefined;
+      held = whole ? record.held : undefined;
+      note = whole ? record.note : undefined;
+    }
   }
-  return { content, matched: found.map(({ record }) => record), volatile };
+  return { content, matched: found.map(({ record }) => record), volatile, held, note };
 }
 
 const CORRECTIVE_ROUND = "[OpenMausBot: a tool call in this turn failed (its result is marked ok:false). Re-run the failed operations with corrected inputs where possible, check the results, then give your final answer. Do not report results you did not get.]";
@@ -486,8 +501,10 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     const transcript = turn.transcript ?? [];
     const replay = replayDelivered(transcript, delivered.get(turn.threadId) ?? []);
     const volatile = halves.volatile.trim();
-    const note = halves.stable === null || (!turn.mentionTurn && replay.volatile === volatile) ? ""
-      : volatileContextNote(volatile, Boolean(replay.volatile));
+    const parts = halves.stable === null ? undefined : turn.systemVolatileParts;
+    const changes = parts && replay.held ? volatileChangeNote(parts, replay.held, mentionParts(Boolean(turn.mentionTurn))) : null;
+    const note = halves.stable === null ? ""
+      : changes ?? (!turn.mentionTurn && replay.volatile === volatile ? "" : volatileContextNote(volatile, Boolean(replay.volatile)));
     const textOnly = (text: string) => !options.computerUse || seesImages(turn) || !turn.images?.length ? text
       : `${text}\n\n${TEXT_ONLY_ATTACHMENT_NOTE}`;
     const userTurn = note ? { ...turn, text: withContextNote(note, turn.text) } : turn;
@@ -496,7 +513,11 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     const record = {
       text: kept,
       sent: textOnly(withContextNote(note, kept)),
-      ...(note ? { volatile } : {}),
+      ...(note ? {
+        volatile, note: ++notesSent,
+        ...(parts ? { held: volatileHeld(parts) } : {}),
+        ...(changes ? { base: replay.note } : {}),
+      } : {}),
       after: transcript.length ? fingerprint(transcript.at(-1)!.text) : "",
     };
     delivered.delete(turn.threadId);

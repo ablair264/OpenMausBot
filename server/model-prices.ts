@@ -13,10 +13,15 @@ export function listPrices(): Readonly<Record<string, ListPrice>> {
   return currentPrices().prices;
 }
 
+/** Anthropic's five-minute prompt-cache write, as a share of the input rate (https://platform.claude.com/docs/en/build-with-claude/prompt-caching#pricing). */
+export const ANTHROPIC_CACHE_WRITE_RATE = 1.25;
+const isAnthropicModel = (key: string) => /(^|\/)claude-/.test(key);
+
 export function listPriceFor(model: string, at: Date = new Date()): ModelPrice | null {
   const { prices, aliases } = currentPrices();
   const key = model.trim().toLowerCase();
-  const entry = prices[aliases.get(key) ?? key];
+  const id = aliases.get(key) ?? key;
+  const entry = prices[id];
   if (!entry) return null;
   const day = at.toISOString().slice(0, 10);
   const change = entry.changes?.filter((candidate) => candidate.from <= day).at(-1);
@@ -25,6 +30,7 @@ export function listPriceFor(model: string, at: Date = new Date()): ModelPrice |
     inputPerMillion: current.inputPerMillion,
     outputPerMillion: current.outputPerMillion,
     ...(current.cachedInputPerMillion !== undefined ? { cachedInputPerMillion: current.cachedInputPerMillion } : {}),
+    ...(isAnthropicModel(id) ? { cacheWritePerMillion: current.inputPerMillion * ANTHROPIC_CACHE_WRITE_RATE } : {}),
   };
 }
 

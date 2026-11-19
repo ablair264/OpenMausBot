@@ -8,6 +8,7 @@ import { loginLabel, type LoginPlace } from "../shared/logins.ts";
 import { vaultNameKey } from "../shared/vault.ts";
 import { isConversational, type ReplyStyle } from "../shared/reply-style.ts";
 import { REPLY_HABITS_PROMPT } from "./reply-habits.ts";
+import { MENTIONS_PART_ID } from "./drivers/prompt-split.ts";
 
 export type PromptPart = { id: string; label: string; text: string };
 export type PromptSection = PromptPart & { bytes: number };
@@ -46,7 +47,7 @@ export function heavyPrompt(sections: readonly PromptSection[]): boolean {
 // Two more ride the volatile half so a bot's stable half is the same bytes across its runs: the bridge rule (on for some
 // runs of a bot and not others) and an automation run's reply rule ("automation-reply"), which otherwise makes every
 // routine run write a new cached prefix.
-const VOLATILE_SECTIONS = new Set(["memory", "mentions", "outstanding", "teammate-questions", "long-waits", "recent", "availability", "active-routines",
+const VOLATILE_SECTIONS = new Set(["memory", MENTIONS_PART_ID, "outstanding", "teammate-questions", "long-waits", "recent", "availability", "active-routines",
   "plan", "assignment", "routine-execution", "automation-reply", "skill-instructions", "playbooks", "device-place", "files", "tool-bridge"]);
 /** In the stable half, so it is not sent again whenever availability changes, but no part of what a per-thread process is
  * keyed on: a warm process gets a changed roster as a note instead of a relaunch (SendTurnInput.systemRoster). */
@@ -92,7 +93,7 @@ export function buildSystemPrompt(
   parts: PromptPart[],
   agents?: { env?: Record<string, string | undefined> },
   opts?: { replyStyle?: ReplyStyle; rules?: string },
-): { text: string; sections: PromptSection[]; stable: string; volatile: string; roster: string } {
+): { text: string; sections: PromptSection[]; stable: string; volatile: string; volatileParts: PromptPart[]; roster: string } {
   const ordered: PromptPart[] = [
     { id: "persona", label: "Identity", text: persona },
     { id: "every-bot-rules", label: "Rules for every bot", text: everyBotRulesPrompt(opts?.rules) },
@@ -108,8 +109,9 @@ export function buildSystemPrompt(
     .map((part) => ({ ...part, bytes: Buffer.byteLength(part.text, "utf8") }));
   const halves = (volatile: boolean) =>
     sections.filter((section) => VOLATILE_SECTIONS.has(section.id) === volatile).map((section) => section.text).join("");
+  const volatileParts = sections.filter((section) => VOLATILE_SECTIONS.has(section.id)).map(({ id, label, text }) => ({ id, label, text }));
   const roster = sections.find((section) => section.id === ROSTER_SECTION)?.text ?? "";
-  return { text: sections.map((section) => section.text).join(""), sections, stable: halves(false), volatile: halves(true), roster };
+  return { text: sections.map((section) => section.text).join(""), sections, stable: halves(false), volatile: halves(true), volatileParts, roster };
 }
 
 // "box" is Boat's persisted kind literal.

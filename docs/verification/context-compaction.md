@@ -374,7 +374,8 @@ those at the top level. A URL inside a command is left as the command ran.
 automatic folding, `compactAt` is a fraction below 1 or a token count, and
 `rebuildBytes` controls replay size (default 24,000 bytes). Context-only settings
 do not reload provider processes. The default threshold is 80% of the known
-model window; a real latest-prompt measurement wins over a transcript estimate,
+model window, and never more than 200,000 tokens, since every model call reads
+the whole context again (a `compactAt` you set is not capped); a real latest-prompt measurement wins over a transcript estimate,
 except an ACP agent's own reading, which is shown and does not time compaction.
 Summed input tokens across tool rounds are never treated as context size.
 For Claude, the threshold and post-compaction regrowth floor also leave 10%

@@ -1328,7 +1328,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           startedModel = started?.model ?? null;
         }
         if (!codexThreadId) throw new Error("Codex did not return a native thread id");
-        const { deliverVolatile, hadVolatile, commitVolatile } = await syncCodexInstructions(
+        const { deliverVolatile, hadVolatile, changes, commitVolatile } = await syncCodexInstructions(
           threadId,
           codexThreadId,
           developerInstructions,
@@ -1336,10 +1336,11 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           resumedNativeThread,
           request,
           Boolean(turn.mentionTurn),
+          promptSplit ? turn.systemVolatileParts : undefined,
         );
         if (deliverVolatile) {
           promptText = withContextNote(
-            volatileContextNote(promptSplit ? turn.systemVolatile ?? "" : "", hadVolatile),
+            changes ?? volatileContextNote(promptSplit ? turn.systemVolatile ?? "" : "", hadVolatile),
             promptText,
           );
         }

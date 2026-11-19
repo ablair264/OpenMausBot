@@ -619,7 +619,7 @@ export const MuseCodeDriver: ProviderDriver<MuseConfig> = {
         if (halves.stable !== null) {
           const receiptKey = JSON.stringify([threadId, sessionId]);
           const composed = splitSessionPrompt(halves.stable, halves.volatile, readPromptSplitReceipt(DRIVER_KIND, receiptKey),
-            turn.system, text, Boolean(turn.mentionTurn), RE_ANCHOR_TURNS);
+            turn.system, text, Boolean(turn.mentionTurn), RE_ANCHOR_TURNS, turn.systemVolatileParts);
           text = composed.text;
           active.receipt = { key: receiptKey, receipt: composed.receipt };
         } else if (turn.system && session.started) {

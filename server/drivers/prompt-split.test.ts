@@ -6,11 +6,18 @@ import {
   promptSplitFingerprints,
   readPromptSplitReceipt,
   splitSessionPrompt,
+  volatileChangeNote,
   volatileContextNote,
+  volatileHeld,
   withContextNote,
   writePromptSplitReceipt,
 } from "./prompt-split.ts";
-import type { PromptSplitReceipt } from "./prompt-split.ts";
+import type { PromptSplitReceipt, VolatilePart } from "./prompt-split.ts";
+
+const MEMORY = { id: "memory", label: "Memory", text: "\nMemory: lives in Toronto." };
+const AVAILABILITY = { id: "availability", label: "Team availability", text: "\nAda is idle." };
+const MENTIONS = { id: "mentions", label: "Mentions", text: "Tagged: @Testy" };
+const joined = (parts: VolatilePart[]) => parts.map((part) => part.text).join("");
 
 describe("promptHalves", () => {
   it("reads the split only when a turn carries both halves", () => {
@@ -164,5 +171,96 @@ describe("splitSessionPrompt", () => {
     expect(state.text).toBe("first");
     state = splitSessionPrompt("stable rules.", "memory", state.receipt, fullSystem, "second", false, 1);
     expect(state.text).toBe(fullSystem + "\n\nsecond");
+  });
+});
+
+describe("volatileChangeNote", () => {
+  it("lists only the sections that changed, appeared or were cleared", () => {
+    const held = volatileHeld([MEMORY, AVAILABILITY]);
+    expect(volatileChangeNote([MEMORY, AVAILABILITY], held)).toBe("");
+    const note = volatileChangeNote([MEMORY, { ...AVAILABILITY, text: "\nAda is working." }], held);
+    expect(note).toContain("[Team availability]\nAda is working.");
+    expect(note).not.toContain("Toronto");
+    const cleared = volatileChangeNote([AVAILABILITY], held);
+    expect(cleared).toContain("[Memory]\nNo longer applies.");
+    expect(cleared).not.toContain("Ada");
+    expect(volatileChangeNote([MEMORY, AVAILABILITY, MENTIONS], held)).toContain("[Mentions]\nTagged: @Testy");
+  });
+
+  it("repeats an unchanged section it is told to, and treats a blank section as absent", () => {
+    const held = volatileHeld([MEMORY, MENTIONS]);
+    expect(volatileChangeNote([MEMORY, MENTIONS], held, new Set(["mentions"]))).toContain("Tagged: @Testy");
+    expect(volatileChangeNote([MEMORY, MENTIONS], held, new Set(["mentions"]))).not.toContain("Toronto");
+    expect(volatileHeld([MEMORY, { ...AVAILABILITY, text: "  " }])).not.toHaveProperty("availability");
+  });
+
+  it("reads two sections sharing an id as one", () => {
+    const first = { id: "device-place", label: "Where the person is", text: "On their phone." };
+    const second = { id: "device-place", label: "Where the person is", text: " Driving." };
+    const held = volatileHeld([first, second]);
+    expect(volatileChangeNote([first, second], held)).toBe("");
+    expect(volatileChangeNote([first, { ...second, text: " Parked." }], held)).toContain("On their phone. Parked.");
+  });
+});
+
+describe("splitSessionPrompt with sections", () => {
+  const fullSystem = "stable rules." + joined([MEMORY, AVAILABILITY]);
+
+  it("sends a later turn only the sections that changed", () => {
+    const first = splitSessionPrompt("stable rules.", joined([MEMORY, AVAILABILITY]), null, fullSystem, "first", false, 0, [MEMORY, AVAILABILITY]);
+    expect(first.text).toBe(fullSystem + "\n\nfirst");
+    const busy = { ...AVAILABILITY, text: "\nAda is working." };
+    const second = splitSessionPrompt("stable rules.", joined([MEMORY, busy]), first.receipt, fullSystem, "second", false, 0, [MEMORY, busy]);
+    expect(second.text).toContain("[Team availability]\nAda is working.");
+    expect(second.text).not.toContain("Toronto");
+    expect(second.text.endsWith("\n\nsecond")).toBe(true);
+    const third = splitSessionPrompt("stable rules.", joined([MEMORY, busy]), second.receipt, fullSystem, "third", false, 0, [MEMORY, busy]);
+    expect(third.text).toBe("third");
+  });
+
+  it("repeats only the mentions section on a tagged turn", () => {
+    const first = splitSessionPrompt("stable rules.", joined([MEMORY, MENTIONS]), null, fullSystem, "first", false, 0, [MEMORY, MENTIONS]);
+    const tagged = splitSessionPrompt("stable rules.", joined([MEMORY, MENTIONS]), first.receipt, fullSystem, "tagged", true, 0, [MEMORY, MENTIONS]);
+    expect(tagged.text).toContain("Tagged: @Testy");
+    expect(tagged.text).not.toContain("Toronto");
+  });
+
+  it("falls back to the whole half for a receipt written before sections were kept", () => {
+    const legacy = promptSplitFingerprints("stable rules.", joined([MEMORY]));
+    const busy = splitSessionPrompt("stable rules.", joined([MEMORY, AVAILABILITY]), legacy, fullSystem, "next", false, 0, [MEMORY, AVAILABILITY]);
+    expect(busy.text).toContain("replaces any earlier copy");
+    expect(busy.text).toContain("Toronto");
+    expect(busy.receipt.held).toEqual(volatileHeld([MEMORY, AVAILABILITY]));
+  });
+
+  it("keeps the sections a receipt holds across a write and a read", () => {
+    const scope = "test-driver";
+    const key = randomUUID();
+    const receipt = { ...promptSplitFingerprints("stable rules", "memory"), held: volatileHeld([MEMORY]) };
+    writePromptSplitReceipt(scope, key, receipt);
+    expect(readPromptSplitReceipt(scope, key)).toEqual(receipt);
+    writePromptSplitReceipt(scope, key, { ...receipt, held: { memory: { label: "Memory", digest: "not a digest" } } });
+    expect(readPromptSplitReceipt(scope, key)?.held).toBeUndefined();
+    deletePromptSplitReceipt(scope, key);
+  });
+});
+
+describe("re-anchoring a session that reports its context size", () => {
+  const fullSystem = "stable rules.\n\nmemory";
+
+  it("never re-anchors once the engine has reported usage, since a compaction shows as a collapse", () => {
+    let state = splitSessionPrompt("stable rules.", "memory", null, fullSystem, "first", false, 2);
+    for (let turn = 2; turn <= 10; turn++) {
+      state = splitSessionPrompt("stable rules.", "memory", { ...state.receipt, lastUsed: 40_000 }, fullSystem, "turn " + turn, false, 2);
+      expect(state.text).toBe("turn " + turn);
+    }
+  });
+
+  it("still re-anchors an engine that never reports usage", () => {
+    let state = splitSessionPrompt("stable rules.", "memory", null, fullSystem, "first", false, 2);
+    state = splitSessionPrompt("stable rules.", "memory", state.receipt, fullSystem, "second", false, 2);
+    state = splitSessionPrompt("stable rules.", "memory", state.receipt, fullSystem, "third", false, 2);
+    state = splitSessionPrompt("stable rules.", "memory", state.receipt, fullSystem, "fourth", false, 2);
+    expect(state.text).toBe(fullSystem + "\n\nfourth");
   });
 });

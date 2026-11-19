@@ -27,6 +27,12 @@ describe("summarizeInsights", () => {
     expect(insights.departments.map((entry) => entry.key)).toEqual(["department:"]);
   });
 
+  it("counts cache writes as part of fresh input, never more than the fresh input there was", () => {
+    const rows = [row("2026-11-03T10:00:00Z", { cacheWrite: 250 }), row("2026-11-03T11:00:00Z", { cacheWrite: 5_000 })];
+    const insights = summarizeInsights(rows, { from: "2026-11-03", to: "2026-11-03" }, "UTC");
+    expect(insights.totals).toMatchObject({ input: 1_200, cachedInput: 800, cacheWrite: 850 });
+  });
+
   it("uses hours for a single day and never counts a turn with no price as free", () => {
     const insights = summarizeInsights([row("2026-11-03T14:10:00Z", { costUsd: null })], { from: "2026-11-03", to: "2026-11-03" }, "UTC");
     expect(insights.unit).toBe("hour");

@@ -56,6 +56,8 @@ export interface BridgeEngine {
   version?: string | null;
   /** The turn's launch folder; absent when the engine falls back to its default. */
   cwd?: string;
+  /** Its provider has read nothing from a prompt cache on recent sizable turns. */
+  uncachedPrompts?: boolean;
 }
 
 /** A turn's engine from its live instance, the instance configs, its last snapshot and its folder. */
@@ -64,6 +66,7 @@ export function turnEngine(
   configs: Record<string, { config?: unknown; environment?: Record<string, string> } | undefined>,
   snapshot: { version?: string | null } | undefined,
   cwd: string | undefined,
+  uncachedPrompts = false,
 ): BridgeEngine {
   const { config, environment } = configs[instance.instanceId] ?? {};
   return {
@@ -73,6 +76,7 @@ export function turnEngine(
     ...(environment !== undefined ? { environment } : {}),
     ...(snapshot?.version != null ? { version: snapshot.version } : {}),
     ...(cwd !== undefined ? { cwd } : {}),
+    ...(uncachedPrompts ? { uncachedPrompts } : {}),
   };
 }
 
@@ -80,6 +84,12 @@ export function turnEngine(
 export interface EngineHost {
   home: string;
   managedPolicyFiles: readonly string[];
+}
+
+/** An API engine whose provider caches nothing pays for the whole tool list on every model call, so it gets the bridge
+ * without the switch, as a local model does. */
+function uncachedChatEngine(engine: BridgeEngine | null | undefined): boolean {
+  return engine?.uncachedPrompts === true && CHAT_RUNTIME_DRIVERS.has(engine.driverKind);
 }
 
 const CHAT_RUNTIME_DRIVERS: ReadonlySet<string> = new Set(["cerebras", "greenference", "modelgo", "grok", "groq", "meta", "minimax", "mistral", "openai-compat"]);
@@ -296,7 +306,7 @@ export function agentsToolBridgeRefusal(
 ): string | null {
   try {
     const localModel = runsLocalModel(bot, engine);
-    if (!agentsToolBridgeEnabled(cfg, env) && (env[TOOL_BRIDGE_ENV] === "0" || !localModel)) return "the switch is off";
+    if (!agentsToolBridgeEnabled(cfg, env) && (env[TOOL_BRIDGE_ENV] === "0" || !(localModel || uncachedChatEngine(engine)))) return "the switch is off";
     if (!localModel && claudeDefersAgentsTools(engine, env, host)) return "Claude Code defers the agents tools on this turn";
     // Security: selection gates match the name in the call, so any selection, even one that permits
     // everything or cannot be read, means no bridge.

@@ -871,7 +871,7 @@ describe("OpenAICompatDriver", () => {
       });
       const recorder = recordEvents(inst.adapter);
       let turns = 0;
-      const send = async (input: { text: string; volatile: string; transcript: Array<{ role: "user" | "assistant"; text: string }>; threadId?: string; mentionTurn?: boolean; recalled?: string }) => {
+      const send = async (input: { text: string; volatile: string; transcript: Array<{ role: "user" | "assistant"; text: string }>; threadId?: string; mentionTurn?: boolean; recalled?: string; parts?: Array<{ id: string; label: string; text: string }> }) => {
         const threadId = input.threadId ?? "thread-replay";
         const settled = ++turns;
         await inst.adapter.sendTurn({
@@ -883,6 +883,7 @@ describe("OpenAICompatDriver", () => {
           transcript: input.transcript,
           ...(input.mentionTurn ? { mentionTurn: true } : {}),
           ...(input.recalled ? { recalled: input.recalled } : {}),
+          ...(input.parts ? { systemVolatileParts: input.parts } : {}),
         });
         await recorder.until((e) => e.type === "turn.completed" && e.threadId === threadId &&
           recorder.events.filter((x) => x.type === "turn.completed").length >= settled);
@@ -931,6 +932,30 @@ describe("OpenAICompatDriver", () => {
         role: "user",
         content: "The OpenMausBot context notes from earlier in this conversation have been cleared; the standing instructions still apply.\n\nagain",
       });
+      await done();
+    });
+
+    it("appends only the sections that changed once the conversation holds a whole note", async () => {
+      const { send, done } = await fixture();
+      const memory = { id: "memory", label: "Memory", text: "Memory: likes tea." };
+      const parts = (busy: string) => [memory, { id: "availability", label: "Team availability", text: ` Busy: ${busy}.` }];
+      const volatile = (busy: string) => parts(busy).map((part) => part.text).join("");
+      const first = await send({ text: "hello", volatile: volatile("nobody"), parts: parts("nobody"), transcript: [] });
+      const second = await send({
+        text: "next", volatile: volatile("Ada"), parts: parts("Ada"),
+        transcript: [{ role: "user", text: "hello" }, { role: "assistant", text: "hi" }],
+      });
+      expect(second.slice(0, first.length)).toEqual(first);
+      expect(second.at(-1).content).toContain("[Team availability]\nBusy: Ada.");
+      expect(second.at(-1).content).not.toContain("likes tea");
+      const trimmed = await send({
+        text: "third", volatile: volatile("Ada"), parts: parts("Ada"),
+        transcript: [
+          { role: "assistant", text: "[2 earlier messages omitted from this context; full history remains in the app.]" },
+          { role: "user", text: "next" }, { role: "assistant", text: "hi" },
+        ],
+      });
+      expect(trimmed.at(-1)).toEqual({ role: "user", content: NOTE + volatile("Ada") + "\n\nthird" });
       await done();
     });
 

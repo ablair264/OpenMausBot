@@ -164,6 +164,9 @@ export interface SendTurnInput {
    * carry the volatile half in the newest user message so the cached prefix stays byte-identical. */
   systemStable?: string;
   systemVolatile?: string;
+  /** systemVolatile section by section, in order; their texts joined are systemVolatile. A driver that remembers which sections a
+   * session holds sends a later turn only the sections that changed. */
+  systemVolatileParts?: ReadonlyArray<{ id: string; label: string; text: string }>;
   /** The team roster as it appears in systemStable. It changes whenever a bot is added, renamed or removed, so a per-thread
    * process keys on systemStable without it and a warm one gets a changed roster as a note (prompt-split.ts). */
   systemRoster?: string;

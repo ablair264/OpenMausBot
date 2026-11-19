@@ -19,8 +19,13 @@ have been listed.
 It is off by default, except for a bot on a local model: one picked from a local
 server, or one on an OpenAI-compatible engine whose URL is on this machine or
 network. A small window cannot spare the full list, so those bots get the bridge
-without the switch. `OMB_AGENTS_TOOL_BRIDGE=0` turns that off too, and the rules
-under "Which bots and engines get it" still apply.
+without the switch. So does a bot on an API engine (the chat runtime row below)
+whose provider caches nothing: once three turns in a row of at least 4,096
+input tokens read nothing from the prompt cache, that engine pays for the whole
+list at full price on every model call, and its turns are bridged until a turn
+reads from the cache again. That reading is kept in memory, per engine, and
+starts again when OpenMausBot restarts. `OMB_AGENTS_TOOL_BRIDGE=0` turns both
+off, and the rules under "Which bots and engines get it" still apply.
 
 ## Why it stays off by default
 
@@ -36,7 +41,7 @@ A hidden tool costs one more model call, and `find_tool` brings up to three full
 request is 13k tokens smaller, which matters most on a turn that uses no hidden tool, but once new threads and new bots
 read a shared prompt cache, those 13k tokens cost only about $0.003 a call. By our estimate the saving and the extra calls roughly cancel out on a
 busy day, so the small-window case above is the reason to use it, not cost. These are 6 runs on one model, chosen as the bridge's
-worst case. Run the eval again before changing this.
+worst case, and they assume a provider that caches. Run the eval again before changing this.
 
 ## Turning it on
 

@@ -128,4 +128,36 @@ describe("Codex instruction receipts", () => {
     expect(after.deliverVolatile).toBe(false);
     expect(after.commitVolatile).toBeNull();
   });
+
+  it("sends a resumed thread only the volatile sections that changed", async () => {
+    const key = randomUUID();
+    const request = vi.fn().mockResolvedValue({});
+    const memory = { id: "memory", label: "Memory", text: "Lives in Toronto." };
+    const idle = { id: "availability", label: "Team availability", text: " Ada is idle." };
+    const busy = { ...idle, text: " Ada is working." };
+    const first = await syncCodexInstructions(key, "native", "rules", memory.text + idle.text, false, request, false, [memory, idle]);
+    expect(first).toMatchObject({ deliverVolatile: true, changes: null });
+    first.commitVolatile?.();
+    const unchanged = await syncCodexInstructions(key, "native", "rules", memory.text + idle.text, true, request, false, [memory, idle]);
+    expect(unchanged).toMatchObject({ deliverVolatile: false, changes: "" });
+    const changed = await syncCodexInstructions(key, "native", "rules", memory.text + busy.text, true, request, false, [memory, busy]);
+    expect(changed.deliverVolatile).toBe(true);
+    expect(changed.changes).toContain("[Team availability]\nAda is working.");
+    expect(changed.changes).not.toContain("Toronto");
+    changed.commitVolatile?.();
+    const tagged = await syncCodexInstructions(key, "native", "rules", memory.text + busy.text, true, request, true, [memory, busy]);
+    expect(tagged).toMatchObject({ deliverVolatile: false, changes: "" });
+  });
+
+  it("records the sections a thread holds the first time a turn lists them", async () => {
+    const key = randomUUID();
+    const request = vi.fn().mockResolvedValue({});
+    const memory = { id: "memory", label: "Memory", text: "Lives in Toronto." };
+    (await syncCodexInstructions(key, "native", "rules", memory.text, false, request)).commitVolatile?.();
+    const listed = await syncCodexInstructions(key, "native", "rules", memory.text, true, request, false, [memory]);
+    expect(listed).toMatchObject({ deliverVolatile: false, changes: null });
+    expect(listed.commitVolatile).toBeTypeOf("function");
+    listed.commitVolatile?.();
+    expect(JSON.parse(readFileSync(receiptPath(key, "native"), "utf8")).held).toHaveProperty("memory");
+  });
 });

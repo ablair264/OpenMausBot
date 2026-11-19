@@ -56,7 +56,7 @@ text and extra work can increase token usage.
 | `roomMemoryCapture` | Off | Lets memory upkeep also read a member bot's room turns. | Extends the material processed by memory upkeep. |
 | `parallelRoomJobs` | On | Runs jobs assigned to several room members side by side, each in its own thread. Set to `false` to run them one at a time in the room's thread. | Allows concurrent engine work rather than sequential jobs. |
 | `acpPlanLines` | Off | Shows an ACP agent's plan as activity lines. | Each emitted line counts as a tool call wherever tool calls are counted; environment override below. |
-| `agentsToolBridge` | Off, except eligible local-model turns | Lists a smaller tool catalog with `find_tool` and `use_tool`. | Tool lookup can add model calls; smaller initial context is not a guaranteed saving. See [Agents tool bridge](agents-tool-bridge.md) for eligibility and measurements. |
+| `agentsToolBridge` | Off, except eligible local-model turns and API engines whose provider caches nothing | Lists a smaller tool catalog with `find_tool` and `use_tool`. | Tool lookup can add model calls; smaller initial context is not a guaranteed saving. See [Agents tool bridge](agents-tool-bridge.md) for eligibility and measurements. |
 | `savedSteps` | On | Allows saving and repeating computer tasks from their steps on a supported host. | Currently requires a Mac server. Enabling it does not add host support. |
 | `usbPhoneTakeover` | Off | Shows the server's USB Android phone live in the Screen panel and lets a person take it over from the bots. | Not offered on a Cloud home or a hosted workspace. The first use downloads the scrcpy server (734 KB) from GitHub. |
 
@@ -101,7 +101,7 @@ shell. For these two switches, exactly `1` or `0` overrides the saved value:
 
 | Variable | Overrides |
 | --- | --- |
-| `OMB_AGENTS_TOOL_BRIDGE` | `features.agentsToolBridge`. `0` also disables the automatic local-model opt-in. Eligibility and tool-selection safeguards still apply when it is `1`. |
+| `OMB_AGENTS_TOOL_BRIDGE` | `features.agentsToolBridge`. `0` also disables the automatic local-model and uncached-provider opt-ins. Eligibility and tool-selection safeguards still apply when it is `1`. |
 | `OMB_ACP_PLAN_LINES` | `features.acpPlanLines`. |
 
 Other strings do not act as these overrides. Restart the server after changing

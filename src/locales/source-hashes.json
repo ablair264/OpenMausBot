@@ -37214,7 +37214,8 @@
       "insights.other": "f97e9da0e3b879f0a9df979ae260a5f7e1371edb127c1862d4f861981166cdc1",
       "insights.breakdown": "3ffe201a20342a4c5f1eaa13c43325221a2d52f9703bedabd926c5912f33f32b",
       "insights.byHour": "f620a58f87d848e19eaa504399e8e75436f753c003c85dd07726339b0231b3d1",
-      "insights.share": "29887a5ff9846ccc23327565a07e17fa6dcaea6211f1898ae825f84ae38f4223"
+      "insights.share": "29887a5ff9846ccc23327565a07e17fa6dcaea6211f1898ae825f84ae38f4223",
+      "insights.cacheWrites": "cdc296c9c1f598d07e36dcef7dc9f868a3f158a39e887a397bce42bb5d14a2ac"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

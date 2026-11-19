@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { compactBudget, compactionReading, contextWindowFor, shouldCompact, DEFAULT_CONTEXT_WINDOW } from "./context-budget.ts";
+import { compactBudget, compactionReading, contextWindowFor, shouldCompact, DEFAULT_COMPACT_TOKENS, DEFAULT_CONTEXT_WINDOW } from "./context-budget.ts";
 
 it("keeps compaction reachable below small model windows", () => {
   expect(compactBudget(8_000)).toBe(6_400);
@@ -45,4 +45,12 @@ it("times compaction from a driver's reading unless the driver reports it for th
   expect(window).toBe(DEFAULT_CONTEXT_WINDOW);
   expect(shouldCompact({ contextTokens: compactionReading({ contextReading: "meter" }, reading)?.tokens, estimatedBytes: 4_000,
     budget: compactBudget(window), window })).toBe(false);
+});
+
+it("caps the default budget on a large window, but never a budget the person set", () => {
+  expect(compactBudget(1_000_000)).toBe(DEFAULT_COMPACT_TOKENS);
+  expect(compactBudget(200_000)).toBe(160_000);
+  expect(compactBudget(1_000_000, 0.5)).toBe(500_000);
+  expect(compactBudget(1_000_000, 600_000)).toBe(600_000);
+  expect(shouldCompact({ contextTokens: 210_000, estimatedBytes: 0, budget: compactBudget(1_000_000), window: 1_000_000 })).toBe(true);
 });
