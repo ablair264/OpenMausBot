@@ -99,7 +99,7 @@
 //   FAKE_CLAUDE_RUN_BASH  1: a scripted Bash call without `output` runs its command (sh -c, in the CLI's folder and
 //     environment); FAKE_CLAUDE_SHELL_LOG  path: each such call appends {command, output}
 // total_cost_usd and modelUsage are running totals (0.01 per result), as the real CLI reports them.
-import { splitLaunchNote } from "./launch-note.ts";
+import { heldVolatileNote, splitChangedNote, splitLaunchNote } from "./launch-note.ts";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { appendFileSync, closeSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -905,7 +905,7 @@ const playTurn = (prompt: JsonValue, late = false) => {
   steeredMessages = [];
   // FAKE_CLAUDE_PROMPTS: every prompt this process receives, one JSON line each.
   if (process.env.FAKE_CLAUDE_PROMPTS) appendFileSync(process.env.FAKE_CLAUDE_PROMPTS, `${JSON.stringify(prompt)}\n`);
-  volatileNote = volatileNoteIn(prompt) ?? volatileNote;
+  volatileNote = volatileNoteIn(prompt) ?? heldVolatileNote(volatileNote, splitChangedNote(prompt));
   const homeFiles = process.env.FAKE_CLAUDE_HOME_FILES === "1";
   const signedInAs = homeFiles ? homeSignIn() : undefined;
   if (!late && process.env.FAKE_CLAUDE_DUMP) {

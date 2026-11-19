@@ -377,7 +377,7 @@ export function csvCell(value: string | number | null): string {
 }
 
 export function usageCsv(rows: UsageRow[], prices: PriceList | null = null): string {
-  const header = ["time", "bot", "model", "engine", "triggered_by", "input_tokens", "output_tokens", "cached_input_tokens", "cost_usd", "cost_source", ...(prices ? ["billable_usd"] : []), "thread", "department", "person", "cache_write_tokens"];
+  const header = ["time", "bot", "model", "engine", "triggered_by", "input_tokens", "output_tokens", "cached_input_tokens", "cache_write_tokens", "cost_usd", "cost_source", ...(prices ? ["billable_usd"] : []), "thread", "department", "person"];
   const lines = [header.join(",")];
   for (const row of rows) {
     lines.push([
@@ -389,13 +389,13 @@ export function usageCsv(rows: UsageRow[], prices: PriceList | null = null): str
       clean(row.input),
       clean(row.output),
       clean(row.cachedInput),
+      clean(row.cacheWrite),
       finiteOrNull(row.costUsd),
       costSourceOf(row),
       ...(prices ? [billableFor(row, prices)] : []),
       row.threadId,
       row.section ?? "",
       personOf(row.trigger) ?? "",
-      clean(row.cacheWrite),
     ].map(csvCell).join(","));
   }
   return lines.join("\n") + "\n";

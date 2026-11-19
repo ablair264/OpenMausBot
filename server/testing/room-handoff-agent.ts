@@ -1,5 +1,5 @@
 // Scripted provider fixture that exercises the REAL injected agents MCP proxy.
-import { splitChangedNote, splitLaunchNote } from "./launch-note.ts";
+import { heldVolatileNote, splitChangedNote, splitLaunchNote } from "./launch-note.ts";
 import { spawn } from "node:child_process";
 import { appendFileSync, readFileSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -134,7 +134,7 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
   const launchNote = splitLaunchNote(prompt);
   const changedNote = splitChangedNote(launchNote.prompt);
   prompt = changedNote.prompt;
-  volatileNote = launchNote.note ?? changedNote.note ?? volatileNote;
+  volatileNote = launchNote.note ?? heldVolatileNote(volatileNote, changedNote);
   const launchSystem = launch?.system ?? readAtLaunch(arg("--append-system-prompt-file"));
   const system = volatileNote && typeof launchSystem === "string" ? `${launchSystem}\n\n${volatileNote}` : launchSystem;
   // Claude snapshots the launch-time system prompt; later instructions arrive in the user message.
